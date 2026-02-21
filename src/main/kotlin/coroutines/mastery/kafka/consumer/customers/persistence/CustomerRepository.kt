@@ -16,4 +16,7 @@ interface CustomerRepository : JpaRepository<CustomerEntity, Long> {
     @Transactional
     @Query("DELETE FROM CustomerEntity c WHERE c.customerId = :customerId")
     fun deleteByCustomerId(customerId: UUID): Int
+
+    @Query("SELECT c.customerId FROM CustomerEntity c ORDER BY c.id ASC LIMIT :limit")
+    fun findOldestCustomerIds(limit: Long): List<UUID>
 }

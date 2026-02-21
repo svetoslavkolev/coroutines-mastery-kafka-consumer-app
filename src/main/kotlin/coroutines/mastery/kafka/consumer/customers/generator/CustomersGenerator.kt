@@ -1,6 +1,7 @@
 package coroutines.mastery.kafka.consumer.customers.generator
 
 import coroutines.mastery.kafka.consumer.customers.Customer
+import coroutines.mastery.kafka.consumer.customers.persistence.CustomerRepository
 import mu.KotlinLogging
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.scheduling.annotation.Scheduled
@@ -12,7 +13,8 @@ import java.util.concurrent.TimeUnit
 @Component
 class CustomersGenerator(
     private val kafkaTemplate: KafkaTemplate<String, String>,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val customerRepository: CustomerRepository
 ) {
 
     private val log = KotlinLogging.logger {}
@@ -43,6 +45,15 @@ class CustomersGenerator(
         }
 
         log.info { "Finished generating customers" }
+    }
+
+    @Scheduled(fixedDelay = 5, timeUnit = TimeUnit.MINUTES)
+    fun sendTombstonesForCustomers() {
+        customerRepository.findOldestCustomerIds(limit = 5)
+            .also { log.info { "Sending tombstone messages for customers with IDs $it" } }
+            .forEach {
+                kafkaTemplate.send("customers", it.toString(), null)
+            }
     }
 
     private fun generateRandomName(maxLength: Int): String {

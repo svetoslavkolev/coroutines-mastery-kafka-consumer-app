@@ -1,0 +1,18 @@
+spring:
+  main:
+    keep-alive: true
+  application:
+    name: kafka-consumer-coroutines
+  docker:
+    compose:
+      stop:
+        command: stop
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      client-id: "coroutines-mastery"
+      retries: 5
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      compression-type: snappy

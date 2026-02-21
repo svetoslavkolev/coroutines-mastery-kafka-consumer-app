@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: customers-table
+      author: Svetoslav Kolev
+      changes:
+        - createTable:
+            tableName: customers
+            columns:
+              - column:
+                  name: id
+                  type: bigserial
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: customer_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: first_name
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_name
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: email
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: address
+                  type: varchar(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: phone_number
+                  type: varchar(20)
+              - column:
+                  name: created_at
+                  type: timestamp
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamp
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false

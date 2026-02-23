@@ -1,17 +1,16 @@
 package coroutines.mastery.kafka.consumer.library
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.withContext
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener
 import org.apache.kafka.clients.consumer.ConsumerRecords
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import kotlin.concurrent.thread
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
@@ -28,10 +27,16 @@ sealed interface PartitionsChangedEvent {
 class Consumer<K, V>(
     kafkaProperties: KafkaProperties,
     topics: List<String>,
-    backgroundScope: CoroutineScope
+    private val backgroundScope: CoroutineScope
 ) {
 
     private val log = KotlinLogging.logger {}
+
+    private val shutdownHook = thread(start = false) { runBlocking { close() } }
+
+    init {
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
+    }
 
     // Since KafkaConsumer is not thread-safe, we need single-threaded dispatcher for all Kafka consumer operations
     private val kafkaDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -51,10 +56,10 @@ class Consumer<K, V>(
             }
         })
 
-        awaitClose { kafkaConsumer.unsubscribe() }
+        awaitClose()
     }
-        .onStart { log.info { "Starting consumer for topics $topics" } }
-        .onCompletion { log.info { "Stopping consumer for topics $topics" } }
+        .onStart { log.info { "Starting consumer for topics $topics..." } }
+        .onCompletion { log.info { "Stopped consumer for topics $topics." } }
         .shareIn( // ensure single topic subscription in case of multiple subscribers
             scope = backgroundScope,
             started = SharingStarted.Eagerly
@@ -71,7 +76,7 @@ class Consumer<K, V>(
         if (partitions.isEmpty()) return
         withContext(kafkaDispatcher) {
             kafkaConsumer.pause(partitions)
-                .also { log.info { "Paused partitions: $partitions" } }
+            log.info { "Paused partitions: $partitions" }
         }
     }
 
@@ -83,7 +88,7 @@ class Consumer<K, V>(
             if (partitionsToResume.isEmpty()) return@withContext
 
             kafkaConsumer.resume(partitionsToResume)
-                .also { log.info { "Resumed partitions: $partitions" } }
+            log.info { "Resumed partitions: $partitions" }
         }
     }
 
@@ -95,6 +100,31 @@ class Consumer<K, V>(
                 exception?.let {
                     log.error(it) { "Exception occurred while committing offsets: $offsets" }
                 } ?: log.info { "Committed offsets: $committedOffsets" }
+            }
+        }
+    }
+
+    suspend fun commitOffsetsSync(offsets: Map<TopicPartition, OffsetAndMetadata>) {
+        if (offsets.isEmpty()) return
+        withContext(kafkaDispatcher) {
+            kafkaConsumer.commitSync(offsets)
+            log.info { "Committed offsets: $offsets" }
+        }
+    }
+
+    private suspend fun close() {
+        log.info { "Cancelling all coroutines..." }
+        backgroundScope.coroutineContext.job.cancelAndJoin()
+        log.info { "All coroutines cancelled." }
+
+        withContext(kafkaDispatcher) {
+            try {
+                log.info { "Closing Kafka consumer..." }
+                kafkaConsumer.close()
+                log.info { "Kafka consumer closed successfully." }
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                log.error(e) { "Error closing Kafka consumer." }
             }
         }
     }

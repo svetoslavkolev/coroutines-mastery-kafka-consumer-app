@@ -5,10 +5,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.channels.onSuccess
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -52,7 +49,7 @@ class QueueManager<K, V>(
                 when (event) {
                     is PartitionsChangedEvent.PartitionsRevoked -> {
                         event.partitions.forEachAsync { partition ->
-                            queues.remove(partition)?.close()
+                            queues.remove(partition)?.cancel()
                             log.info { "Closed queue for revoked partition $partition" }
                             queueLifecycleFlow.emit(QueueLifecycleEvent.QueueRemoved(partition))
                         }
@@ -68,6 +65,11 @@ class QueueManager<K, V>(
                         }
                     }
                 }
+            }
+            .onStart { log.info { "Start collecting partition changes..." } }
+            .onCompletion {
+                queues.values.forEach { it.cancel() }
+                log.info { "Stopped collecting partition changes. All partition queues cancelled." }
             }
             .launchIn(backgroundScope)
     }
@@ -102,6 +104,8 @@ class QueueManager<K, V>(
 
                 consumer.pause(partitionsToPause)
             }
+            .onStart { log.info { "Start collecting consumer records..." } }
+            .onCompletion { log.info { "Stopped collecting consumer records." } }
             .launchIn(backgroundScope)
     }
 

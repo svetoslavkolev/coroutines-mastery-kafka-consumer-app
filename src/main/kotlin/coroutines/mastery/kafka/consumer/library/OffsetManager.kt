@@ -1,10 +1,10 @@
 package coroutines.mastery.kafka.consumer.library
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
@@ -34,15 +34,27 @@ class OffsetManager<K, V>(
                     )
                 }
             }
+            .onStart { log.info { "Start collecting latest offsets..." } }
+            .onCompletion { log.info { "Stopped collecting latest offsets." } }
             .launchIn(backgroundScope)
 
         backgroundScope.launch {
-            while (true) {
-                delay(5000)
-                mutex.withLock {
-                    log.info { "Committing offsets $nextOffsets" }
-                    consumer.commitOffsets(nextOffsets)
-                    nextOffsets.clear()
+            try {
+                while (true) {
+                    delay(500000)
+                    mutex.withLock {
+                        log.info { "Committing offsets $nextOffsets" }
+                        consumer.commitOffsets(nextOffsets)
+                        nextOffsets.clear()
+                    }
+                }
+            } finally {
+                withContext(NonCancellable) {
+                    mutex.withLock {
+                        log.info { "Committing offsets before quitting: $nextOffsets" }
+                        consumer.commitOffsetsSync(nextOffsets)
+                        nextOffsets.clear()
+                    }
                 }
             }
         }

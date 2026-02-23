@@ -17,7 +17,7 @@ class Poller<K, V>(
     private val recordsFlow: SharedFlow<ConsumerRecords<K, V>> = flow {
         while (true) {
             log.info { "Polling..." }
-            val records = consumer.poll(500.milliseconds)
+            val records = consumer.poll(100.milliseconds)
 
             if (!records.isEmpty) {
                 val recordCount = records.count()
@@ -25,11 +25,11 @@ class Poller<K, V>(
                 emit(records)
                 log.info { "Emitted $recordCount records." }
             }
-            delay(100)
+            delay(500)
         }
     }
         .onStart { log.info { "Starting polling for Kafka records..." } }
-        .onCompletion { log.info { "Polling Kafka records completed." } }
+        .onCompletion { log.info { "Stopped polling for Kafka records." } }
         .shareIn( // ensure polling happens only once in case of multiple subscribers
             scope = backgroundScope,
             started = SharingStarted.WhileSubscribed()

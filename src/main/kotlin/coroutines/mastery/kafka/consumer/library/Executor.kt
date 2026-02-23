@@ -2,10 +2,7 @@ package coroutines.mastery.kafka.consumer.library
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.*
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
@@ -48,7 +45,6 @@ class Executor<K, V>(
                             processPartition(event.partition, event.queue)
                         }
                         partitionJobs[event.partition] = job
-                        log.info { "Started executor job for partition ${event.partition}" }
                     }
 
                     is QueueLifecycleEvent.QueueRemoved -> {
@@ -57,6 +53,8 @@ class Executor<K, V>(
                     }
                 }
             }
+            .onStart { log.info { "Start collecting queue lifecycle..." } }
+            .onCompletion { log.info { "Stopped collecting queue lifecycle." } }
             .launchIn(backgroundScope)
     }
 
@@ -65,6 +63,8 @@ class Executor<K, V>(
         partition: TopicPartition,
         queue: ReceiveChannel<List<ConsumerRecord<K, V>>>
     ) {
+        log.info { "Started executor job for partition $partition" }
+
         for (records in queue) {
             log.info { "Processing ${records.size} records from partition $partition ..." }
             records.forEach { recordProcessor.process(it) }

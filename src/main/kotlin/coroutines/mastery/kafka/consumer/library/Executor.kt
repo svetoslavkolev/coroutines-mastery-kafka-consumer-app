@@ -46,12 +46,11 @@ class Executor<K, V>(
     }
 
     suspend fun awaitPartitionJobs(partitions: Collection<TopicPartition>) {
-        partitions.forEachAsync { partition ->
-            partitionJobs[partition]?.let { job ->
-                log.info { "Waiting for executor job for partition $partition to complete..." }
-                job.join()
-                log.info { "Executor job for partition $partition completed" }
-            }
+        val jobs = partitionJobs.entries.filter { it.key in partitions }.map { it.value }
+        if (jobs.isNotEmpty()) {
+            log.info { "Waiting for ${jobs.size} executor jobs to complete for partitions $partitions..." }
+            jobs.joinAll()
+            log.info { "Executor jobs for partitions $partitions completed" }
         }
     }
 

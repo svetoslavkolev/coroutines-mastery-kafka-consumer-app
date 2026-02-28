@@ -1,10 +1,7 @@
 package coroutines.mastery.kafka.consumer.library
 
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
@@ -14,9 +11,9 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 class OffsetManager<K, V>(
-    consumer: Consumer<K, V>,
-    executor: Executor<K, V>,
-    backgroundScope: CoroutineScope,
+    private val consumer: Consumer<K, V>,
+    private val executor: Executor<K, V>,
+    private val backgroundScope: CoroutineScope,
 ) {
 
     private val log = KotlinLogging.logger {}
@@ -24,20 +21,43 @@ class OffsetManager<K, V>(
     private val mutex = Mutex()
 
     init {
-        executor.observeLatestOffsets()
-            .onEach { event ->
+        executor.registerOffsetNotifier { event ->
+            mutex.withLock {
+                nextOffsets[event.partition] = OffsetAndMetadata(
+                    event.latestOffset + 1, // offset of the next record should be committed
+                    Optional.ofNullable(event.leaderEpoch),
+                    ""
+                )
+            }
+        }
+
+        observePartitionRevocations()
+        launchPeriodicOffsetCommit()
+    }
+
+    private fun observePartitionRevocations() {
+        consumer.observePartitionsChanges()
+            .filterIsInstance(PartitionsChangedEvent.PartitionsRevoked::class)
+            .onEach { revokedEvent ->
+                // waiting for executor jobs to complete before committing offsets for revoked partitions
+                // as those executor jobs will be canceled on partition revocation and
+                // will notify about their last processed offsets, therefore, waiting for their completion
+                // to be sure the offsets were emitted before committing them to Kafka
+                executor.awaitPartitionJobs(revokedEvent.partitions)
+
                 mutex.withLock {
-                    nextOffsets[event.partition] = OffsetAndMetadata(
-                        event.latestOffset + 1, // offset of the next record should be committed
-                        Optional.ofNullable(event.leaderEpoch),
-                        ""
-                    )
+                    val offsetsToCommit = nextOffsets.filterKeys { it in revokedEvent.partitions }
+                    log.info { "Committing offsets due to partition revocation: $offsetsToCommit" }
+                    consumer.commitOffsetsSync(offsetsToCommit)
+                    offsetsToCommit.keys.forEach { nextOffsets.remove(it) }
                 }
             }
-            .onStart { log.info { "Start collecting latest offsets..." } }
-            .onCompletion { log.info { "Stopped collecting latest offsets." } }
+            .onStart { log.info { "Start observing partition revocation for offset commits..." } }
+            .onCompletion { log.info { "Stopped observing partition revocation for offset commits." } }
             .launchIn(backgroundScope)
+    }
 
+    private fun launchPeriodicOffsetCommit() {
         backgroundScope.launch {
             try {
                 while (true) {
@@ -50,8 +70,14 @@ class OffsetManager<K, V>(
                 }
             } finally {
                 withContext(NonCancellable) {
+                    // waiting all executor jobs to complete before committing offsets
+                    // as those executor jobs will be canceled on shutdown and
+                    // will notify about their last processed offsets, therefore, waiting for their completion
+                    // to be sure the offsets were emitted before committing them to Kafka
+                    executor.awaitAllPartitionJobs()
+
                     mutex.withLock {
-                        log.info { "Committing offsets before quitting: $nextOffsets" }
+                        log.info { "Committing offsets before shutdown: $nextOffsets" }
                         consumer.commitOffsetsSync(nextOffsets)
                         nextOffsets.clear()
                     }
@@ -59,4 +85,5 @@ class OffsetManager<K, V>(
             }
         }
     }
+
 }

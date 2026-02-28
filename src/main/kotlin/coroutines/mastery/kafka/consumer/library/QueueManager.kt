@@ -47,14 +47,6 @@ class QueueManager<K, V>(
         consumer.observePartitionsChanges()
             .onEach { event ->
                 when (event) {
-                    is PartitionsChangedEvent.PartitionsRevoked -> {
-                        event.partitions.forEachAsync { partition ->
-                            queues.remove(partition)?.cancel()
-                            log.info { "Closed queue for revoked partition $partition" }
-                            queueLifecycleFlow.emit(QueueLifecycleEvent.QueueRemoved(partition))
-                        }
-                    }
-
                     is PartitionsChangedEvent.PartitionsAssigned -> {
                         event.partitions.forEachAsync { partition ->
                             queues[partition] = Channel(capacity = 10)
@@ -62,6 +54,20 @@ class QueueManager<K, V>(
                             queueLifecycleFlow.emit(
                                 QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
                             )
+                        }
+                    }
+
+                    is PartitionsChangedEvent.PartitionsRevoked -> {
+                        event.partitions.forEachAsync { partition ->
+                            queues.remove(partition)
+                                ?.cancel()
+                                ?.also {
+                                    log.info { "Closed queue for revoked partition $partition" }
+                                    queueLifecycleFlow.emit(
+                                        QueueLifecycleEvent.QueueRemoved(partition)
+                                    )
+                                }
+                                ?: log.warn { "Queue for partition $partition not found for cancelling." }
                         }
                     }
                 }

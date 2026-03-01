@@ -20,7 +20,8 @@ sealed interface QueueLifecycleEvent<K, V> {
         val queue: ReceiveChannel<List<ConsumerRecord<K, V>>>
     ) : QueueLifecycleEvent<K, V>
 
-    data class QueueRemoved<K, V>(override val partition: TopicPartition) :
+    @JvmInline
+    value class QueueRemoved<K, V>(override val partition: TopicPartition) :
         QueueLifecycleEvent<K, V>
 }
 
@@ -47,29 +48,9 @@ class QueueManager<K, V>(
         consumer.observePartitionsChanges()
             .onEach { event ->
                 when (event) {
-                    is PartitionsChangedEvent.PartitionsAssigned -> {
-                        event.partitions.forEachAsync { partition ->
-                            queues[partition] = Channel(capacity = 10)
-                            log.info { "Created queue for assigned partition $partition" }
-                            queueLifecycleFlow.emit(
-                                QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
-                            )
-                        }
-                    }
-
-                    is PartitionsChangedEvent.PartitionsRevoked -> {
-                        event.partitions.forEachAsync { partition ->
-                            queues.remove(partition)
-                                ?.cancel()
-                                ?.also {
-                                    log.info { "Closed queue for revoked partition $partition" }
-                                    queueLifecycleFlow.emit(
-                                        QueueLifecycleEvent.QueueRemoved(partition)
-                                    )
-                                }
-                                ?: log.warn { "Queue for partition $partition not found for cancelling." }
-                        }
-                    }
+                    is PartitionsChangedEvent.PartitionsAssigned -> createQueues(event.partitions)
+                    is PartitionsChangedEvent.PartitionsRevoked,
+                    is PartitionsChangedEvent.PartitionsLost -> removeAndCancelQueues(event.partitions)
                 }
             }
             .onStart { log.info { "Start collecting partition changes..." } }
@@ -78,6 +59,28 @@ class QueueManager<K, V>(
                 log.info { "Stopped collecting partition changes. All partition queues cancelled." }
             }
             .launchIn(backgroundScope)
+    }
+
+    private suspend fun createQueues(partitions: Collection<TopicPartition>) {
+        partitions.forEachAsync { partition ->
+            queues[partition] = Channel(capacity = 10)
+            log.info { "Created queue for assigned partition $partition" }
+            queueLifecycleFlow.emit(
+                QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
+            )
+        }
+    }
+
+    private suspend fun removeAndCancelQueues(partitions: Collection<TopicPartition>) {
+        partitions.forEachAsync { partition ->
+            queues.remove(partition)
+                ?.cancel()
+                ?.also {
+                    log.info { "Cancelled queue for partition $partition" }
+                    queueLifecycleFlow.emit(QueueLifecycleEvent.QueueRemoved(partition))
+                }
+                ?: log.warn { "Queue for partition $partition not found for cancelling." }
+        }
     }
 
     private fun observeRecords() {

@@ -1,7 +1,6 @@
 package coroutines.mastery.kafka.consumer.library
 
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
@@ -31,30 +30,51 @@ class OffsetManager<K, V>(
             }
         }
 
-        observePartitionRevocations()
+        registerRebalanceCallback()
         launchPeriodicOffsetCommit()
     }
 
-    private fun observePartitionRevocations() {
-        consumer.observePartitionsChanges()
-            .filterIsInstance(PartitionsChangedEvent.PartitionsRevoked::class)
-            .onEach { revokedEvent ->
-                // waiting for executor jobs to complete before committing offsets for revoked partitions
-                // as those executor jobs will be canceled on partition revocation and
-                // will notify about their last processed offsets, therefore, waiting for their completion
-                // to be sure the offsets were emitted before committing them to Kafka
-                executor.awaitPartitionJobs(revokedEvent.partitions)
+    private fun registerRebalanceCallback() {
+        consumer.registerRebalanceCallback(object : RebalanceCallback {
 
-                mutex.withLock {
-                    val offsetsToCommit = nextOffsets.filterKeys { it in revokedEvent.partitions }
-                    log.info { "Committing offsets due to partition revocation: $offsetsToCommit" }
-                    consumer.commitOffsetsSync(offsetsToCommit)
-                    offsetsToCommit.keys.forEach { nextOffsets.remove(it) }
+            override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) {
+                runBlocking {
+                    // waiting for executor jobs to complete before committing offsets for revoked partitions
+                    // as those executor jobs will be canceled on partition revocation and
+                    // will notify about their last processed offsets, therefore, waiting for their completion
+                    // to be sure the offsets were emitted before committing them to Kafka
+                    executor.awaitPartitionJobs(partitions)
+
+                    mutex.withLock {
+                        val offsetsToCommit = nextOffsets.filterKeys { it in partitions }
+                        log.info { "Committing offsets due to partition revocation: $offsetsToCommit" }
+
+                        // A non-suspending variant of offset commits needs to be used because
+                        // we're already on the kafkaDispatcher thread and usage of withContext(kafkaDispatcher)
+                        // will suspend forever (this callback is invoked from onPartitionsRevoked
+                        // which is called from poll() which is running on kafkaDispatcher's thread).
+                        consumer.commitOffsetsBlocking(offsetsToCommit)
+                        offsetsToCommit.keys.forEach { nextOffsets.remove(it) }
+                    }
                 }
             }
-            .onStart { log.info { "Start observing partition revocation for offset commits..." } }
-            .onCompletion { log.info { "Stopped observing partition revocation for offset commits." } }
-            .launchIn(backgroundScope)
+
+            override fun onPartitionsLost(partitions: Collection<TopicPartition>) {
+                runBlocking {
+                    // waiting for executor jobs to complete as they may emit their last offsets,
+                    // and we need to make sure they've completed to be able to clean up
+                    // those offsets from the map, so to avoid committing them as commit is not possible
+                    // when partitions are lost.
+                    executor.awaitPartitionJobs(partitions)
+
+                    mutex.withLock {
+                        val offsetsToCleanup = nextOffsets.filterKeys { it in partitions }
+                        log.info { "Cleanup offsets for lost partitions: $offsetsToCleanup" }
+                        offsetsToCleanup.keys.forEach { nextOffsets.remove(it) }
+                    }
+                }
+            }
+        })
     }
 
     private fun launchPeriodicOffsetCommit() {

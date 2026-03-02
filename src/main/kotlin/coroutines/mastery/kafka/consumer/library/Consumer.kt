@@ -10,6 +10,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
@@ -17,11 +18,29 @@ import kotlin.time.toJavaDuration
 sealed interface PartitionsChangedEvent {
     val partitions: Collection<TopicPartition>
 
-    data class PartitionsRevoked(override val partitions: Collection<TopicPartition>) :
+    @JvmInline
+    value class PartitionsAssigned(override val partitions: Collection<TopicPartition>) :
         PartitionsChangedEvent
 
-    data class PartitionsAssigned(override val partitions: Collection<TopicPartition>) :
+    @JvmInline
+    value class PartitionsRevoked(override val partitions: Collection<TopicPartition>) :
         PartitionsChangedEvent
+
+    @JvmInline
+    value class PartitionsLost(override val partitions: Collection<TopicPartition>) :
+        PartitionsChangedEvent
+}
+
+/**
+ * A synchronous callback to be invoked from ConsumerRebalanceListener methods,
+ * as some operations, e.g. offset commit for revoked partitions, need to be called from within the
+ * ConsumerRebalanceListener callbacks. The current architecture with asynchronous flow processing
+ * is not appropriate for each and every operation related to Kafka. That's why this interface exists.
+ */
+interface RebalanceCallback {
+    fun onPartitionsAssigned(partitions: Collection<TopicPartition>) {}
+    fun onPartitionsRevoked(partitions: Collection<TopicPartition>) {}
+    fun onPartitionsLost(partitions: Collection<TopicPartition>) {}
 }
 
 class Consumer<K, V>(
@@ -32,9 +51,12 @@ class Consumer<K, V>(
 
     private val log = KotlinLogging.logger {}
 
-    private val shutdownHook = thread(start = false) { runBlocking { close() } }
-
     init {
+        val shutdownHook = thread(start = false) {
+            log.info { "Shutdown initiated. Cleaning up resources..." }
+            runBlocking { close() }
+            log.info { "Shutdown completed. All resources cleaned up." }
+        }
         Runtime.getRuntime().addShutdownHook(shutdownHook)
     }
 
@@ -43,19 +65,31 @@ class Consumer<K, V>(
 
     private val kafkaConsumer = KafkaConsumer<K, V>(kafkaProperties.toProps())
 
+    private var rebalanceCallbacks = ConcurrentHashMap.newKeySet<RebalanceCallback>()
+
     private val partitionsFlow = callbackFlow {
-        kafkaConsumer.subscribe(topics.toList(), object : ConsumerRebalanceListener {
-            override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) {
-                log.info { "Partitions revoked: $partitions" }
-                trySendBlocking(PartitionsChangedEvent.PartitionsRevoked(partitions))
-            }
+        val rebalanceListener = object : ConsumerRebalanceListener {
 
             override fun onPartitionsAssigned(partitions: Collection<TopicPartition>) {
                 log.info { "Partitions assigned: $partitions" }
                 trySendBlocking(PartitionsChangedEvent.PartitionsAssigned(partitions))
+                rebalanceCallbacks.forEach { it.onPartitionsAssigned(partitions) }
             }
-        })
 
+            override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) {
+                log.info { "Partitions revoked: $partitions" }
+                trySendBlocking(PartitionsChangedEvent.PartitionsRevoked(partitions))
+                rebalanceCallbacks.forEach { it.onPartitionsRevoked(partitions) }
+            }
+
+            override fun onPartitionsLost(partitions: Collection<TopicPartition>) {
+                log.warn { "Partitions lost (consumer kicked out of the group): $partitions" }
+                trySendBlocking(PartitionsChangedEvent.PartitionsLost(partitions))
+                rebalanceCallbacks.forEach { it.onPartitionsLost(partitions) }
+            }
+        }
+
+        kafkaConsumer.subscribe(topics.toList(), rebalanceListener)
         awaitClose()
     }
         .onStart { log.info { "Starting consumer for topics $topics..." } }
@@ -66,6 +100,10 @@ class Consumer<K, V>(
         )
 
     fun observePartitionsChanges() = partitionsFlow
+
+    fun registerRebalanceCallback(callback: RebalanceCallback) {
+        rebalanceCallbacks.add(callback)
+    }
 
     suspend fun poll(timeout: Duration): ConsumerRecords<K, V> =
         withContext(kafkaDispatcher) {
@@ -110,6 +148,12 @@ class Consumer<K, V>(
             kafkaConsumer.commitSync(offsets)
             log.info { "Committed offsets: $offsets" }
         }
+    }
+
+    fun commitOffsetsBlocking(offsets: Map<TopicPartition, OffsetAndMetadata>) {
+        if (offsets.isEmpty()) return
+        kafkaConsumer.commitSync(offsets)
+        log.info { "Committed offsets: $offsets" }
     }
 
     private suspend fun close() {

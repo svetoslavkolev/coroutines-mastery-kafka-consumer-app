@@ -142,14 +142,6 @@ class Consumer<K, V>(
         }
     }
 
-    suspend fun commitOffsetsSync(offsets: Map<TopicPartition, OffsetAndMetadata>) {
-        if (offsets.isEmpty()) return
-        withContext(kafkaDispatcher) {
-            kafkaConsumer.commitSync(offsets)
-            log.info { "Committed offsets: $offsets" }
-        }
-    }
-
     fun commitOffsetsBlocking(offsets: Map<TopicPartition, OffsetAndMetadata>) {
         if (offsets.isEmpty()) return
         kafkaConsumer.commitSync(offsets)

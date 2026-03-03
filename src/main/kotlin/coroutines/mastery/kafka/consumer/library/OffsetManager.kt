@@ -1,6 +1,9 @@
 package coroutines.mastery.kafka.consumer.library
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
@@ -79,28 +82,12 @@ class OffsetManager<K, V>(
 
     private fun launchPeriodicOffsetCommit() {
         backgroundScope.launch {
-            try {
-                while (true) {
-                    delay(500000)
-                    mutex.withLock {
-                        log.info { "Committing offsets $nextOffsets" }
-                        consumer.commitOffsets(nextOffsets)
-                        nextOffsets.clear()
-                    }
-                }
-            } finally {
-                withContext(NonCancellable) {
-                    // waiting all executor jobs to complete before committing offsets
-                    // as those executor jobs will be canceled on shutdown and
-                    // will notify about their last processed offsets, therefore, waiting for their completion
-                    // to be sure the offsets were emitted before committing them to Kafka
-                    executor.awaitAllPartitionJobs()
-
-                    mutex.withLock {
-                        log.info { "Committing offsets before shutdown: $nextOffsets" }
-                        consumer.commitOffsetsSync(nextOffsets)
-                        nextOffsets.clear()
-                    }
+            while (true) {
+                delay(500000)
+                mutex.withLock {
+                    log.info { "Committing offsets $nextOffsets" }
+                    consumer.commitOffsets(nextOffsets)
+                    nextOffsets.clear()
                 }
             }
         }

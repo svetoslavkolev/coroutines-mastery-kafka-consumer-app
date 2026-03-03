@@ -54,15 +54,6 @@ class Executor<K, V>(
         }
     }
 
-    suspend fun awaitAllPartitionJobs() {
-        val jobs = partitionJobs.values
-        if (jobs.isNotEmpty()) {
-            log.info { "Waiting for all ${jobs.size} executor jobs to complete..." }
-            jobs.joinAll()
-            log.info { "All executor jobs completed" }
-        }
-    }
-
     private fun observeQueues() {
         queueManager.observeQueueLifecycle()
             .onEach { event ->

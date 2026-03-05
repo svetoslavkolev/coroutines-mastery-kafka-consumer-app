@@ -150,6 +150,7 @@ class Consumer<K, V>(
 
     private suspend fun close() {
         log.info { "Cancelling all coroutines..." }
+        // no need to keep the scope active as we are in shutdown phase
         backgroundScope.coroutineContext.job.cancelAndJoin()
         log.info { "All coroutines cancelled." }
 

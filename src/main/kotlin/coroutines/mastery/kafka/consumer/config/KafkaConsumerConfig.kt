@@ -4,7 +4,6 @@ import coroutines.mastery.kafka.consumer.customers.CustomerRecordProcessor
 import coroutines.mastery.kafka.consumer.library.AutoOffsetReset
 import coroutines.mastery.kafka.consumer.library.Consumers
 import coroutines.mastery.kafka.consumer.library.KafkaProperties
-import kotlinx.coroutines.CoroutineScope
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -17,7 +16,6 @@ class KafkaConsumerConfig {
     @Bean
     fun customerConsumer(
         recordProcessor: CustomerRecordProcessor,
-        backgroundScope: CoroutineScope,
         @Value($$"${spring.kafka.bootstrap-servers}") servers: String
     ) =
         Consumers.start(
@@ -31,7 +29,6 @@ class KafkaConsumerConfig {
                 autoOffsetReset = AutoOffsetReset.EARLIEST
             ),
             topics = listOf("customers"),
-            recordProcessor = recordProcessor,
-            backgroundScope = backgroundScope
+            recordProcessor = recordProcessor
         )
 }

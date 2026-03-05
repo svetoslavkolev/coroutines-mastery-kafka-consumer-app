@@ -5,7 +5,6 @@ import java.util.*
 import kotlin.reflect.KClass
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
 
 enum class AutoOffsetReset {
     EARLIEST, LATEST, NONE
@@ -18,8 +17,6 @@ data class KafkaProperties(
     val valueDeserializer: KClass<out Deserializer<*>>,
     val maxPollRecords: Int = 500,
     val maxPollInterval: Duration = 5.minutes,
-    val enableAutoCommit: Boolean = false,
-    val autoCommitInterval: Duration = 5.seconds,
     val autoOffsetReset: AutoOffsetReset = AutoOffsetReset.LATEST,
 )
 
@@ -31,8 +28,7 @@ fun KafkaProperties.toProps(): Properties {
     props["value.deserializer"] = valueDeserializer.qualifiedName
     props["max.poll.records"] = maxPollRecords.toString()
     props["max.poll.interval.ms"] = maxPollInterval.inWholeMilliseconds.toString()
-    props["enable.auto.commit"] = enableAutoCommit.toString()
-    props["auto.commit.interval.ms"] = autoCommitInterval.inWholeMilliseconds.toString()
+    props["enable.auto.commit"] = "false"
     props["auto.offset.reset"] = autoOffsetReset.name.lowercase()
     return props
 }

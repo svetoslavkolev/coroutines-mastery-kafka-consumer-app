@@ -1,12 +1,13 @@
 package coroutines.mastery.kafka.consumer.config
 
 import coroutines.mastery.kafka.consumer.customers.CustomerRecordProcessor
-import coroutines.mastery.kafka.consumer.library.AutoOffsetReset
 import coroutines.mastery.kafka.consumer.library.builder.kafkaConsumer
+import coroutines.mastery.kafka.consumer.library.config.OffsetHandlingConfig
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
 @Configuration
@@ -18,16 +19,25 @@ class KafkaConsumerConfig {
         @Value($$"${spring.kafka.bootstrap-servers}") servers: String
     ) =
         kafkaConsumer {
-            config {
-                bootstrapServers(servers)
-                consumerGroup("customers-consumer-group")
-                keyDeserializer(StringDeserializer::class)
-                valueDeserializer(StringDeserializer::class)
-                maxPollRecords(100)
-                maxPollInterval(1.minutes)
-                autoOffsetReset(AutoOffsetReset.EARLIEST)
-            }
+            bootstrapServers(servers)
+            consumerGroup("customers-consumer-group")
             topics("customers")
-            processor(recordProcessor)
+            keyDeserializer(StringDeserializer::class)
+            valueDeserializer(StringDeserializer::class)
+            polling {
+                maxPollRecords(100)
+                pollTimeout(100.milliseconds)
+                pollInterval(500.milliseconds)
+                maxPollInterval(1.minutes)
+            }
+            recordProcessing {
+                queueSize(10)
+                concurrency(5)
+                processor(recordProcessor)
+            }
+            offsetHandling {
+                offsetCommitInterval(1.minutes)
+                autoOffsetReset(OffsetHandlingConfig.AutoOffsetReset.EARLIEST)
+            }
         }
 }

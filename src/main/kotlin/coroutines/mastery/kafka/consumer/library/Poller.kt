@@ -1,14 +1,15 @@
 package coroutines.mastery.kafka.consumer.library
 
+import coroutines.mastery.kafka.consumer.library.config.PollingConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRecords
-import kotlin.time.Duration.Companion.milliseconds
 
 class Poller<K, V>(
-    private val consumer: Consumer<K, V>,
+    consumer: Consumer<K, V>,
+    pollingConfig: PollingConfig,
     backgroundScope: CoroutineScope
 ) {
 
@@ -17,7 +18,7 @@ class Poller<K, V>(
     private val recordsFlow: SharedFlow<ConsumerRecords<K, V>> = flow {
         while (true) {
             log.info { "Polling..." }
-            val records = consumer.poll(100.milliseconds)
+            val records = consumer.poll(pollingConfig.pollTimeout)
 
             if (!records.isEmpty) {
                 val recordCount = records.count()
@@ -25,10 +26,15 @@ class Poller<K, V>(
                 emit(records)
                 log.info { "Emitted $recordCount records." }
             }
-            delay(500)
+            delay(pollingConfig.pollInterval)
         }
     }
-        .onStart { log.info { "Starting polling for Kafka records..." } }
+        .onStart {
+            log.info {
+                "Starting polling for Kafka records with pollTimeout = ${pollingConfig.pollTimeout} " +
+                        "and pollInterval = ${pollingConfig.pollInterval}..."
+            }
+        }
         .onCompletion { log.info { "Stopped polling for Kafka records." } }
         .shareIn( // ensure polling happens only once in case of multiple subscribers
             scope = backgroundScope,

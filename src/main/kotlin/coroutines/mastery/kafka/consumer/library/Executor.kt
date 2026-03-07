@@ -1,5 +1,6 @@
 package coroutines.mastery.kafka.consumer.library
 
+import coroutines.mastery.kafka.consumer.library.config.RecordProcessingConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.launchIn
@@ -28,9 +29,10 @@ data class LatestProcessedOffset(
 class Executor<K, V>(
     private val consumer: Consumer<K, V>,
     private val queueManager: QueueManager<K, V>,
-    private val recordProcessor: RecordProcessor<K, V>,
+    private val recordProcessingConfig: RecordProcessingConfig<K, V>,
     private val backgroundScope: CoroutineScope,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(5),
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO
+        .limitedParallelism(recordProcessingConfig.concurrency),
 ) {
 
     private val log = KotlinLogging.logger {}
@@ -91,7 +93,7 @@ class Executor<K, V>(
             var processedInBatch = 0
             try {
                 records.forEach { record ->
-                    recordProcessor.process(record)
+                    recordProcessingConfig.processor.process(record)
                     lastProcessedOffset = record.offset()
                     lastLeaderEpoch = record.leaderEpoch().orElse(null)
                     processedInBatch++

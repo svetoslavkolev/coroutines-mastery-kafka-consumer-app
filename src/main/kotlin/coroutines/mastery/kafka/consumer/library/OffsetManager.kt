@@ -1,5 +1,6 @@
 package coroutines.mastery.kafka.consumer.library
 
+import coroutines.mastery.kafka.consumer.library.config.OffsetHandlingConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -15,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 class OffsetManager<K, V>(
     private val consumer: Consumer<K, V>,
     private val executor: Executor<K, V>,
+    private val offsetHandlingConfig: OffsetHandlingConfig,
     private val backgroundScope: CoroutineScope,
 ) {
 
@@ -82,8 +84,9 @@ class OffsetManager<K, V>(
 
     private fun launchPeriodicOffsetCommit() {
         backgroundScope.launch {
+            log.info { "Launched periodic offset commit job with interval ${offsetHandlingConfig.offsetCommitInterval}." }
             while (true) {
-                delay(500000)
+                delay(offsetHandlingConfig.offsetCommitInterval)
                 mutex.withLock {
                     log.info { "Committing offsets $nextOffsets" }
                     consumer.commitOffsets(nextOffsets)

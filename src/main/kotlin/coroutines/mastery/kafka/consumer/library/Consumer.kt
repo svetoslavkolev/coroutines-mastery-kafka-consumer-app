@@ -1,5 +1,7 @@
 package coroutines.mastery.kafka.consumer.library
 
+import coroutines.mastery.kafka.consumer.library.config.ConsumerConfig
+import coroutines.mastery.kafka.consumer.library.config.toKafkaProperties
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
@@ -44,8 +46,7 @@ interface RebalanceCallback {
 }
 
 class Consumer<K, V>(
-    kafkaProperties: KafkaProperties,
-    topics: List<String>,
+    config: ConsumerConfig<K, V>,
     private val backgroundScope: CoroutineScope
 ) {
 
@@ -63,7 +64,7 @@ class Consumer<K, V>(
     // Since KafkaConsumer is not thread-safe, we need single-threaded dispatcher for all Kafka consumer operations
     private val kafkaDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    private val kafkaConsumer = KafkaConsumer<K, V>(kafkaProperties.toProps())
+    private val kafkaConsumer = KafkaConsumer<K, V>(config.toKafkaProperties())
 
     private var rebalanceCallbacks = ConcurrentHashMap.newKeySet<RebalanceCallback>()
 
@@ -89,11 +90,11 @@ class Consumer<K, V>(
             }
         }
 
-        kafkaConsumer.subscribe(topics.toList(), rebalanceListener)
+        kafkaConsumer.subscribe(config.topics.toList(), rebalanceListener)
         awaitClose()
     }
-        .onStart { log.info { "Starting consumer for topics $topics..." } }
-        .onCompletion { log.info { "Stopped consumer for topics $topics." } }
+        .onStart { log.info { "Starting consumer for topics ${config.topics}..." } }
+        .onCompletion { log.info { "Stopped consumer for topics ${config.topics}." } }
         .shareIn( // ensure single topic subscription in case of multiple subscribers
             scope = backgroundScope,
             started = SharingStarted.Eagerly

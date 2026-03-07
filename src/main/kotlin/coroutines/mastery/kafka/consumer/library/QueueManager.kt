@@ -1,5 +1,6 @@
 package coroutines.mastery.kafka.consumer.library
 
+import coroutines.mastery.kafka.consumer.library.config.RecordProcessingConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -28,6 +29,7 @@ sealed interface QueueLifecycleEvent<K, V> {
 class QueueManager<K, V>(
     private val poller: Poller<K, V>,
     private val consumer: Consumer<K, V>,
+    private val recordProcessingConfig: RecordProcessingConfig<K, V>,
     private val backgroundScope: CoroutineScope
 ) {
 
@@ -63,8 +65,8 @@ class QueueManager<K, V>(
 
     private suspend fun createQueues(partitions: Collection<TopicPartition>) {
         partitions.forEachAsync { partition ->
-            queues[partition] = Channel(capacity = 10)
-            log.info { "Created queue for assigned partition $partition" }
+            queues[partition] = Channel(capacity = recordProcessingConfig.queueSize)
+            log.info { "Created queue for assigned partition $partition with capacity ${recordProcessingConfig.queueSize}." }
             queueLifecycleFlow.emit(
                 QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
             )

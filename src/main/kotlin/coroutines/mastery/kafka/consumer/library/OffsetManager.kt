@@ -1,10 +1,7 @@
 package coroutines.mastery.kafka.consumer.library
 
 import coroutines.mastery.kafka.consumer.library.config.OffsetHandlingConfig
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
@@ -85,7 +82,7 @@ class OffsetManager<K, V>(
     private fun launchPeriodicOffsetCommit() {
         backgroundScope.launch {
             log.info { "Launched periodic offset commit job with interval ${offsetHandlingConfig.offsetCommitInterval}." }
-            while (true) {
+            while (currentCoroutineContext().isActive) {
                 delay(offsetHandlingConfig.offsetCommitInterval)
                 mutex.withLock {
                     log.info { "Committing offsets $nextOffsets" }

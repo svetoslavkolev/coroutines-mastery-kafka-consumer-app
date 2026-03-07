@@ -2,8 +2,10 @@ package coroutines.mastery.kafka.consumer.library
 
 import coroutines.mastery.kafka.consumer.library.config.PollingConfig
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRecords
 
@@ -20,7 +22,7 @@ class Poller<K, V>(
     private val log = KotlinLogging.logger {}
 
     private val recordsFlow: SharedFlow<ConsumerRecords<K, V>> = flow {
-        while (true) {
+        while (currentCoroutineContext().isActive) {
             log.info { "Polling..." }
             val records = consumer.poll(pollingConfig.pollTimeout)
 

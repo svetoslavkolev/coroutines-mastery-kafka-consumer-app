@@ -6,16 +6,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import mu.KotlinLogging
 
-data class ConsumerContext<K, V>(
-    val consumer: Consumer<K, V>,
-    val poller: Poller<K, V>
+data class ConsumerHandle<K, V>(
+    val rebalances: RebalanceFlow,
+    val records: RecordsFlow<K, V>
 )
 
 object Consumers {
 
     private val log = KotlinLogging.logger {}
 
-    fun <K, V> start(consumerConfig: ConsumerConfig<K, V>): ConsumerContext<K, V> {
+    fun <K, V> start(consumerConfig: ConsumerConfig<K, V>): ConsumerHandle<K, V> {
         val backgroundScope =
             CoroutineScope(SupervisorJob() + CoroutineExceptionHandler { _, throwable ->
                 log.error(throwable) { "Exception occurred in a coroutine: ${throwable.message}" }
@@ -30,7 +30,7 @@ object Consumers {
             consumer, qMgr, consumerConfig.recordProcessing, backgroundScope
         )
         OffsetManager(consumer, executor, consumerConfig.offsetHandling, backgroundScope)
-        return ConsumerContext(consumer, poller)
+        return ConsumerHandle(consumer, poller)
     }
 
 }

@@ -1,6 +1,6 @@
 package coroutines.mastery.kafka.consumer.library.builder
 
-import coroutines.mastery.kafka.consumer.library.ConsumerContext
+import coroutines.mastery.kafka.consumer.library.ConsumerHandle
 import coroutines.mastery.kafka.consumer.library.Consumers
 import coroutines.mastery.kafka.consumer.library.RecordProcessor
 import coroutines.mastery.kafka.consumer.library.config.ConsumerConfig
@@ -15,7 +15,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
-fun <K, V> kafkaConsumer(block: ConsumerConfigBuilder<K, V>.() -> Unit): ConsumerContext<K, V> =
+fun <K, V> kafkaConsumer(block: ConsumerConfigBuilder<K, V>.() -> Unit): ConsumerHandle<K, V> =
     ConsumerConfigBuilder<K, V>().apply(block).build().let(Consumers::start)
 
 class ConsumerConfigBuilder<K, V> {

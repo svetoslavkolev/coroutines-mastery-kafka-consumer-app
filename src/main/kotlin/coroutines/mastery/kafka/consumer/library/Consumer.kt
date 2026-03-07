@@ -17,20 +17,24 @@ import kotlin.concurrent.thread
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
-sealed interface PartitionsChangedEvent {
+sealed interface RebalanceEvent {
     val partitions: Collection<TopicPartition>
 
     @JvmInline
     value class PartitionsAssigned(override val partitions: Collection<TopicPartition>) :
-        PartitionsChangedEvent
+        RebalanceEvent
 
     @JvmInline
     value class PartitionsRevoked(override val partitions: Collection<TopicPartition>) :
-        PartitionsChangedEvent
+        RebalanceEvent
 
     @JvmInline
     value class PartitionsLost(override val partitions: Collection<TopicPartition>) :
-        PartitionsChangedEvent
+        RebalanceEvent
+}
+
+interface RebalanceFlow {
+    fun observeRebalanceEvents(): Flow<RebalanceEvent>
 }
 
 /**
@@ -48,7 +52,7 @@ interface RebalanceCallback {
 class Consumer<K, V>(
     config: ConsumerConfig<K, V>,
     private val backgroundScope: CoroutineScope
-) {
+) : RebalanceFlow {
 
     private val log = KotlinLogging.logger {}
 
@@ -68,24 +72,24 @@ class Consumer<K, V>(
 
     private var rebalanceCallbacks = ConcurrentHashMap.newKeySet<RebalanceCallback>()
 
-    private val partitionsFlow = callbackFlow {
+    private val rebalanceFlow = callbackFlow {
         val rebalanceListener = object : ConsumerRebalanceListener {
 
             override fun onPartitionsAssigned(partitions: Collection<TopicPartition>) {
                 log.info { "Partitions assigned: $partitions" }
-                trySendBlocking(PartitionsChangedEvent.PartitionsAssigned(partitions))
+                trySendBlocking(RebalanceEvent.PartitionsAssigned(partitions))
                 rebalanceCallbacks.forEach { it.onPartitionsAssigned(partitions) }
             }
 
             override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) {
                 log.info { "Partitions revoked: $partitions" }
-                trySendBlocking(PartitionsChangedEvent.PartitionsRevoked(partitions))
+                trySendBlocking(RebalanceEvent.PartitionsRevoked(partitions))
                 rebalanceCallbacks.forEach { it.onPartitionsRevoked(partitions) }
             }
 
             override fun onPartitionsLost(partitions: Collection<TopicPartition>) {
                 log.warn { "Partitions lost (consumer kicked out of the group): $partitions" }
-                trySendBlocking(PartitionsChangedEvent.PartitionsLost(partitions))
+                trySendBlocking(RebalanceEvent.PartitionsLost(partitions))
                 rebalanceCallbacks.forEach { it.onPartitionsLost(partitions) }
             }
         }
@@ -100,7 +104,7 @@ class Consumer<K, V>(
             started = SharingStarted.Eagerly
         )
 
-    fun observePartitionsChanges() = partitionsFlow
+    override fun observeRebalanceEvents(): Flow<RebalanceEvent> = rebalanceFlow
 
     fun registerRebalanceCallback(callback: RebalanceCallback) {
         rebalanceCallbacks.add(callback)

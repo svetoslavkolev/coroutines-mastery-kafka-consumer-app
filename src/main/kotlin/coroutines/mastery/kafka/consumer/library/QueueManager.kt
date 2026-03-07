@@ -47,12 +47,12 @@ class QueueManager<K, V>(
     fun observeQueueLifecycle() = queueLifecycleFlow.asSharedFlow()
 
     private fun observePartitions() {
-        consumer.observePartitionsChanges()
+        consumer.observeRebalanceEvents()
             .onEach { event ->
                 when (event) {
-                    is PartitionsChangedEvent.PartitionsAssigned -> createQueues(event.partitions)
-                    is PartitionsChangedEvent.PartitionsRevoked,
-                    is PartitionsChangedEvent.PartitionsLost -> removeAndCancelQueues(event.partitions)
+                    is RebalanceEvent.PartitionsAssigned -> createQueues(event.partitions)
+                    is RebalanceEvent.PartitionsRevoked,
+                    is RebalanceEvent.PartitionsLost -> removeAndCancelQueues(event.partitions)
                 }
             }
             .onStart { log.info { "Start collecting partition changes..." } }

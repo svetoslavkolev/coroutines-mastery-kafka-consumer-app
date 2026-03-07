@@ -7,11 +7,15 @@ import kotlinx.coroutines.flow.*
 import mu.KotlinLogging
 import org.apache.kafka.clients.consumer.ConsumerRecords
 
+interface RecordsFlow<K, V> {
+    fun observeRecords(): Flow<ConsumerRecords<K, V>>
+}
+
 class Poller<K, V>(
     consumer: Consumer<K, V>,
     pollingConfig: PollingConfig,
     backgroundScope: CoroutineScope
-) {
+) : RecordsFlow<K, V> {
 
     private val log = KotlinLogging.logger {}
 
@@ -41,5 +45,5 @@ class Poller<K, V>(
             started = SharingStarted.WhileSubscribed()
         )
 
-    fun observeRecords(): Flow<ConsumerRecords<K, V>> = recordsFlow
+    override fun observeRecords(): Flow<ConsumerRecords<K, V>> = recordsFlow
 }

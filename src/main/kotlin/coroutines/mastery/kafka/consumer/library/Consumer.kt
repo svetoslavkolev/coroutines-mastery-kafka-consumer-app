@@ -12,7 +12,11 @@ import org.apache.kafka.clients.consumer.ConsumerRecords
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.InterruptException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.concurrent.thread
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
@@ -49,6 +53,7 @@ interface RebalanceCallback {
     fun onPartitionsLost(partitions: Collection<TopicPartition>) {}
 }
 
+@OptIn(ExperimentalAtomicApi::class)
 class Consumer<K, V>(
     config: ConsumerConfig<K, V>,
     private val backgroundScope: CoroutineScope
@@ -56,11 +61,22 @@ class Consumer<K, V>(
 
     private val log = KotlinLogging.logger {}
 
+    private val executor = Executors.newSingleThreadExecutor()
+
+    private val wasShutdown = AtomicBoolean(false)
+
+    private val shutdownTask = Runnable {
+        if (wasShutdown.compareAndSet(expectedValue = false, newValue = true)) {
+            log.info { "Kafka Consumer shutdown initiated. Cleaning up resources..." }
+            runBlocking { close() }
+            executor.shutdown()
+            log.info { "Kafka Consumer shutdown completed. All resources cleaned up." }
+        }
+    }
+
     init {
         val shutdownHook = thread(start = false) {
-            log.info { "Shutdown initiated. Cleaning up resources..." }
-            runBlocking { close() }
-            log.info { "Shutdown completed. All resources cleaned up." }
+            shutdownTask.run()
         }
         Runtime.getRuntime().addShutdownHook(shutdownHook)
     }
@@ -112,7 +128,18 @@ class Consumer<K, V>(
 
     suspend fun poll(timeout: Duration): ConsumerRecords<K, V> =
         withContext(kafkaDispatcher) {
-            kafkaConsumer.poll(timeout.toJavaDuration())
+            try {
+                kafkaConsumer.poll(timeout.toJavaDuration())
+            } catch (e: InterruptException) {
+                log.info { "Consumer interrupted, initiating immediate shutdown..." }
+                executor.execute(shutdownTask)
+                throw e
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                log.error(e) { "Fatal error during polling, initiating immediate shutdown because: ${e.message}" }
+                executor.execute(shutdownTask)
+                throw e
+            }
         }
 
     suspend fun pause(partitions: Collection<TopicPartition>) {

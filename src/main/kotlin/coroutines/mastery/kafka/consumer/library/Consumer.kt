@@ -168,7 +168,7 @@ class Consumer<K, V>(
         withContext(kafkaDispatcher) {
             kafkaConsumer.commitAsync(offsets) { committedOffsets, exception ->
                 exception?.let {
-                    log.error(it) { "Exception occurred while committing offsets: $offsets" }
+                    log.error(it) { "Exception occurred while committing offsets: $committedOffsets" }
                 } ?: log.info { "Committed offsets: $committedOffsets" }
             }
         }

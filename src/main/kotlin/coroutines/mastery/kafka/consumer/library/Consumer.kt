@@ -7,12 +7,10 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.*
 import mu.KotlinLogging
-import org.apache.kafka.clients.consumer.ConsumerRebalanceListener
-import org.apache.kafka.clients.consumer.ConsumerRecords
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.clients.consumer.OffsetAndMetadata
+import org.apache.kafka.clients.consumer.*
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.InterruptException
+import org.apache.kafka.common.errors.RebalanceInProgressException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.concurrent.atomics.AtomicBoolean
@@ -166,10 +164,15 @@ class Consumer<K, V>(
         if (offsets.isEmpty()) return
 
         withContext(kafkaDispatcher) {
-            kafkaConsumer.commitAsync(offsets) { committedOffsets, exception ->
-                exception?.let {
-                    log.error(it) { "Exception occurred while committing offsets: $committedOffsets" }
-                } ?: log.info { "Committed offsets: $committedOffsets" }
+            try {
+                commitOffsetsBlocking(offsets)
+            } catch (e: CommitFailedException) {
+                log.warn(e) { "CommitFailedException while committing offsets: ${e.message}." }
+            } catch (e: RebalanceInProgressException) {
+                log.warn(e) { "RebalanceInProgressException while committing offsets: ${e.message}." }
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                log.error(e) { "Error committing offsets: ${e.message}." }
             }
         }
     }

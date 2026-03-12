@@ -5,8 +5,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
+import org.apache.kafka.clients.consumer.CommitFailedException
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.RebalanceInProgressException
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -84,10 +86,22 @@ class OffsetManager<K, V>(
             log.info { "Launched periodic offset commit job with interval ${offsetHandlingConfig.offsetCommitInterval}." }
             while (currentCoroutineContext().isActive) {
                 delay(offsetHandlingConfig.offsetCommitInterval)
+
                 mutex.withLock {
-                    log.info { "Committing offsets $nextOffsets" }
-                    consumer.commitOffsets(nextOffsets)
-                    nextOffsets.clear()
+                    try {
+                        log.info { "Committing offsets $nextOffsets" }
+                        consumer.commitOffsets(nextOffsets)
+                        nextOffsets.clear()
+                    } catch (e: CommitFailedException) {
+                        log.error(e) { "CommitFailedException while committing offsets: ${e.message}." }
+                        nextOffsets.clear()
+                    } catch (e: RebalanceInProgressException) {
+                        log.error(e) { "RebalanceInProgressException while committing offsets: ${e.message}." }
+                        nextOffsets.clear()
+                    } catch (e: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        log.error(e) { "Error committing offsets, will be retried: ${e.message}." }
+                    }
                 }
             }
         }

@@ -87,21 +87,27 @@ class OffsetManager<K, V>(
             while (currentCoroutineContext().isActive) {
                 delay(offsetHandlingConfig.offsetCommitInterval)
 
-                mutex.withLock {
-                    try {
-                        log.info { "Committing offsets $nextOffsets" }
-                        consumer.commitOffsets(nextOffsets)
-                        nextOffsets.clear()
-                    } catch (e: CommitFailedException) {
-                        log.error(e) { "CommitFailedException while committing offsets: ${e.message}." }
-                        nextOffsets.clear()
-                    } catch (e: RebalanceInProgressException) {
-                        log.error(e) { "RebalanceInProgressException while committing offsets: ${e.message}." }
-                        nextOffsets.clear()
-                    } catch (e: Exception) {
-                        currentCoroutineContext().ensureActive()
-                        log.error(e) { "Error committing offsets, will be retried: ${e.message}." }
+                val offsetsToCommit = mutex.withLock { nextOffsets.toMap() }
+                log.info { "Committing offsets $offsetsToCommit" }
+
+                try {
+                    consumer.commitOffsets(offsetsToCommit)
+                    mutex.withLock {
+                        offsetsToCommit.keys
+                            .filter { partition ->
+                                offsetsToCommit[partition]?.offset() == nextOffsets[partition]?.offset()
+                            }
+                            .forEach { nextOffsets.remove(it) }
                     }
+                } catch (e: CommitFailedException) {
+                    log.error(e) { "CommitFailedException while committing offsets: ${e.message}." }
+                    mutex.withLock { nextOffsets.clear() }
+                } catch (e: RebalanceInProgressException) {
+                    log.error(e) { "RebalanceInProgressException while committing offsets: ${e.message}." }
+                    mutex.withLock { nextOffsets.clear() }
+                } catch (e: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    log.error(e) { "Error committing offsets, will be retried: ${e.message}." }
                 }
             }
         }

@@ -6,14 +6,14 @@ import mu.KotlinLogging
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.json.JsonMapper
 import java.util.*
 import java.util.concurrent.TimeUnit
 
 @Component
 class CustomersGenerator(
     private val kafkaTemplate: KafkaTemplate<String, String>,
-    private val objectMapper: ObjectMapper,
+    private val jsonMapper: JsonMapper,
     private val customerRepository: CustomerRepository
 ) {
 
@@ -23,7 +23,7 @@ class CustomersGenerator(
     fun generateCustomers() {
         log.info { "Generating customers" }
         // Generate and send 10,000 customers
-        repeat(10) {
+        repeat(100) {
             val firstName = generateRandomName(8)
             val lastName = generateRandomName(12)
 
@@ -40,7 +40,7 @@ class CustomersGenerator(
             kafkaTemplate.send(
                 "customers",
                 customer.customerId.toString(),
-                objectMapper.writeValueAsString(customer)
+                jsonMapper.writeValueAsString(customer)
             )
         }
 

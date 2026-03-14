@@ -130,9 +130,10 @@ class QueueManager<K, V>(
         // those records need to be retried. And it is done in a
         // separate coroutine to avoid buffer overflow in Poller#shareIn's buffer
         backgroundScope.launch {
-            queues[partition]?.send(rejectedRecords)
-            log.info {
-                "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+            queues[partition]?.send(rejectedRecords)?.also {
+                log.info {
+                    "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+                }
             }
         }
     }

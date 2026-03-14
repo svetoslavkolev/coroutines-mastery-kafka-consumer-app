@@ -47,15 +47,18 @@ class OffsetManager<K, V>(
                     // to be sure the offsets were emitted before committing them to Kafka
                     executor.awaitPartitionJobs(partitions)
 
-                    mutex.withLock {
-                        val offsetsToCommit = nextOffsets.filterKeys { it in partitions }
-                        log.info { "Committing offsets due to partition revocation: $offsetsToCommit" }
+                    val offsetsToCommit = mutex.withLock {
+                        nextOffsets.filterKeys { it in partitions }
+                    }
 
-                        // A non-suspending variant of offset commits needs to be used because
-                        // we're already on the kafkaDispatcher thread and usage of withContext(kafkaDispatcher)
-                        // will suspend forever (this callback is invoked from onPartitionsRevoked
-                        // which is called from poll() which is running on kafkaDispatcher's thread).
-                        consumer.commitOffsetsBlocking(offsetsToCommit)
+                    log.info { "Committing offsets due to partition revocation: $offsetsToCommit" }
+
+                    // A non-suspending variant of offset commits needs to be used because
+                    // we're already on the kafkaDispatcher thread and usage of withContext(kafkaDispatcher)
+                    // will suspend forever (this callback is invoked from onPartitionsRevoked
+                    // which is called from poll() which is running on kafkaDispatcher's thread).
+                    consumer.commitOffsetsBlocking(offsetsToCommit)
+                    mutex.withLock {
                         offsetsToCommit.keys.forEach { nextOffsets.remove(it) }
                     }
                 }
@@ -91,15 +94,20 @@ class OffsetManager<K, V>(
                 try {
                     consumer.commitOffsets(offsetsToCommit)
                     mutex.withLock {
-                        offsetsToCommit.keys
-                            .filter { partition ->
-                                offsetsToCommit[partition]?.offset() == nextOffsets[partition]?.offset()
+                        offsetsToCommit.keys.forEach { partition ->
+                            if (offsetsToCommit[partition]?.offset() == nextOffsets[partition]?.offset()) {
+                                nextOffsets.remove(partition)
                             }
-                            .forEach { nextOffsets.remove(it) }
+                        }
                     }
                 } catch (e: Exception) {
                     currentCoroutineContext().ensureActive()
-                    log.warn(e) { "Committing offsets failed: ${e.message}." }
+                    log.warn(e) {
+                        "Committing offsets failed: ${e.message}. " +
+                                "Offsets will either be retried in next cycle, " +
+                                "or committed during onPartitionRevoked, " +
+                                "or cleaned up during onPartitionsLost."
+                    }
                 }
             }
         }

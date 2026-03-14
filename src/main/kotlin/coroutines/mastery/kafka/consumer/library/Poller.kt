@@ -44,7 +44,7 @@ class Poller<K, V>(
         .onCompletion { log.info { "Stopped polling for Kafka records." } }
         .shareIn( // ensure polling happens only once in case of multiple subscribers
             scope = backgroundScope,
-            started = SharingStarted.WhileSubscribed()
+            started = SharingStarted.Lazily
         )
 
     override fun observeRecords(): Flow<ConsumerRecords<K, V>> = recordsFlow

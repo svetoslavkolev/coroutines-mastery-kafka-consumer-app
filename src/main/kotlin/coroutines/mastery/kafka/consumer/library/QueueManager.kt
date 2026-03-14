@@ -65,10 +65,11 @@ class QueueManager<K, V>(
 
     private suspend fun createQueues(partitions: Collection<TopicPartition>) {
         partitions.forEachAsync { partition ->
-            queues[partition] = Channel(capacity = recordProcessingConfig.queueSize)
+            val channel = Channel<List<ConsumerRecord<K, V>>>(capacity = recordProcessingConfig.queueSize)
+            queues[partition] = channel
             log.info { "Created queue for assigned partition $partition with capacity ${recordProcessingConfig.queueSize}." }
             queueLifecycleFlow.emit(
-                QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
+                QueueLifecycleEvent.QueueCreated(partition, channel)
             )
         }
     }
@@ -130,9 +131,26 @@ class QueueManager<K, V>(
         // those records need to be retried. And it is done in a
         // separate coroutine to avoid buffer overflow in Poller#shareIn's buffer
         backgroundScope.launch {
-            queues[partition]?.send(rejectedRecords)
-            log.info {
-                "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+            // Queue might have been removed due to partition revocation
+            // between rejection and this send attempt
+            val queue = queues[partition]
+            if (queue != null) {
+                try {
+                    queue.send(rejectedRecords)
+                    log.info {
+                        "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+                    }
+                } catch (e: Exception) {
+                    log.warn(e) { 
+                        "Failed to resend records to queue for partition $partition. " +
+                        "Partition might have been revoked: ${e.message}" 
+                    }
+                }
+            } else {
+                log.warn { 
+                    "Cannot resend records for partition $partition - queue was removed " +
+                    "(partition likely revoked)" 
+                }
             }
         }
     }

@@ -5,8 +5,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mu.KotlinLogging
+import org.apache.kafka.clients.consumer.CommitFailedException
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.RebalanceInProgressException
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -100,13 +102,21 @@ class OffsetManager<K, V>(
                             }
                         }
                     }
+                } catch (e: CommitFailedException) {
+                    log.warn(e) {
+                        "Committing offsets failed - consumer was kicked out of the group. " +
+                                "Offsets will be cleaned up during onPartitionsLost on the next poll."
+                    }
+                } catch (e: RebalanceInProgressException) {
+                    log.warn(e) {
+                        "Committing offsets failed - rebalance already started. " +
+                                "In case of onPartitionsRevoked, offsets should be already committed. " +
+                                "In case of onPartitionsLost, offsets should be already cleaned up."
+                    }
                 } catch (e: Exception) {
                     currentCoroutineContext().ensureActive()
                     log.warn(e) {
-                        "Committing offsets failed: ${e.message}. " +
-                                "Offsets will either be retried in next cycle, " +
-                                "or committed during onPartitionRevoked, " +
-                                "or cleaned up during onPartitionsLost."
+                        "Committing offsets failed: ${e.message}. Offsets will be retried in the next cycle."
                     }
                 }
             }

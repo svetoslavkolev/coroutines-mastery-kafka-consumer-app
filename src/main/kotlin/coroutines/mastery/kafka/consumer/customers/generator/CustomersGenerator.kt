@@ -22,8 +22,8 @@ class CustomersGenerator(
     @Scheduled(fixedDelay = 3, timeUnit = TimeUnit.MINUTES)
     fun generateCustomers() {
         log.info { "Generating customers" }
-        // Generate and send 10,000 customers
-        repeat(100) {
+        // Generate and send 1000 customers
+        repeat(1000) {
             val firstName = generateRandomName(8)
             val lastName = generateRandomName(12)
 

@@ -1,7 +1,11 @@
 # Kafka Consumer with Coroutines
 
 A Kotlin library for consuming Kafka messages with coroutines, providing automatic backpressure
-handling, partition-level concurrency and robust offset management.
+handling, partition-level concurrency and robust offset management. It is inspired
+by [Parallel, Back-pressured Kafka Consumer](https://tuleism.github.io/blog/2021/parallel-backpressured-kafka-consumer/)
+blog post.
+
+> At the moment, this library only implements at-least-once processing guarantees.
 
 ## Table of Contents
 
@@ -12,6 +16,7 @@ handling, partition-level concurrency and robust offset management.
 - [Getting Started](#getting-started)
 - [Configuration](#configuration)
 - [Error Handling](#error-handling)
+- [Handling Blocking Operations in Processors](#handling-blocking-operations-in-processors)
 - [Threading Model](#threading-model)
 - [Offset Management](#offset-management)
 - [Backpressure Handling](#backpressure-handling)
@@ -473,6 +478,51 @@ The library automatically handles exceptions from Kafka operations:
 | `CommitFailedException`        | Logged as warning           | Expected when kicked out, offets cleaned up via `onPartitionsLost`                                                                                               |
 | `RebalanceInProgressException` | Logged as warning           | Expected during rebalance. If rebalance event is `onPartitionsRevoked` - offsets are committed. If rebalance event is`onPartitionsLost` - offsets are cleaned up |
 
+## Handling Blocking Operations in Processors
+
+**⚠️ Important**: If your processor performs **blocking I/O operations** (JDBC calls, blocking HTTP
+clients, legacy APIs), you **must** switch the coroutine context to a blocking dispatcher to avoid
+starving the processing dispatcher's thread pool.
+
+```kotlin
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+processor { record ->
+    // Switch to Dispatchers.IO for blocking operations
+    withContext(Dispatchers.IO.limitedParallelism(20)) {
+        // Blocking JDBC call
+        database.executeQuery("INSERT INTO ...")
+
+        // Blocking HTTP call
+        httpClient.post(url, data)
+    }
+
+    // Or use virtual threads (Java 21+)
+    withContext(Executors.newVirtualThreadPerTaskExecutor().asCoroutineDispatcher()) {
+        // Blocking operations on virtual threads
+        blockingApi.call()
+    }
+}
+```
+
+**Why this matters:**
+
+- The library's default processing dispatcher has limited threads (configured via `concurrency`)
+  which should be used only for processing records from the partition queues
+- Blocking operations hold threads without releasing them and prevent them from processing other
+  records, leading to backpressure and potential rebalances
+- This can cause thread pool starvation and processing delays
+- Using `withContext(Dispatchers.IO.limitedParallelism)` or virtual threads prevents this issue
+
+**Best practices:**
+
+- Use suspending APIs whenever possible (no context switch needed with `withContext(...)`)
+- For blocking JDBC: use `Dispatchers.IO.limitedParallelism` as a dedicated database dispatcher
+- For blocking HTTP: use `Dispatchers.IO.limitedParallelism` or switch to async HTTP clients (Ktor,
+  etc.)
+- For Java 21+: consider virtual threads for blocking operations
+
 ## Threading Model
 
 ### Single-Threaded Kafka Dispatcher
@@ -791,10 +841,14 @@ CoroutineScope(Dispatchers.Default).launch {
    `max.poll.interval.ms`)
 5. **Keep processing fast** - Slow processing → queue backlog → memory pressure
 6. **Use appropriate queue size** - Balance between memory usage and pause/resume frequency
+7. **Switch context for blocking operations** - Use `withContext(Dispatchers.IO.limitedParallelism)`
+   or virtual threads for blocking I/O to avoid thread pool starvation
 
 ### ❌ DON'T
 
-1. **Don't block threads** - Use suspending functions, not blocking I/O
+1. **Don't perform blocking operations on default dispatcher** - Always switch to
+   `Dispatchers.IO.limitedParallelism` or a virtual threads dispatcher (see
+   [Handling Blocking Operations in Processors](#handling-blocking-operations-in-processors))
 2. **Don't access KafkaConsumer directly** - Library manages it for thread safety
 3. **Don't commit offsets manually** - Library handles offset management
 4. **Don't ignore PartitionsLost events** - They indicate configuration or performance issues

@@ -1,6 +1,7 @@
 package coroutines.mastery.kafka.consumer.library
 
 import coroutines.mastery.kafka.consumer.library.config.RecordProcessingConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -65,10 +66,12 @@ class QueueManager<K, V>(
 
     private suspend fun createQueues(partitions: Collection<TopicPartition>) {
         partitions.forEachAsync { partition ->
-            queues[partition] = Channel(capacity = recordProcessingConfig.queueSize)
+            val channel =
+                Channel<List<ConsumerRecord<K, V>>>(capacity = recordProcessingConfig.queueSize)
+            queues[partition] = channel
             log.info { "Created queue for assigned partition $partition with capacity ${recordProcessingConfig.queueSize}." }
             queueLifecycleFlow.emit(
-                QueueLifecycleEvent.QueueCreated(partition, queues[partition]!!)
+                QueueLifecycleEvent.QueueCreated(partition, channel)
             )
         }
     }
@@ -130,11 +133,19 @@ class QueueManager<K, V>(
         // those records need to be retried. And it is done in a
         // separate coroutine to avoid buffer overflow in Poller#shareIn's buffer
         backgroundScope.launch {
-            queues[partition]?.send(rejectedRecords)?.also {
-                log.info {
-                    "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+            queues[partition]?.let { queue ->
+                try {
+                    queue.send(rejectedRecords)
+                    log.info {
+                        "Sent ${rejectedRecords.size} retried records to queue for partition $partition, $offsetsLogMessage"
+                    }
+                } catch (e: CancellationException) {
+                    log.debug {
+                        "Retrying rejected records cancelled for partition $partition."
+                    }
+                    throw e
                 }
-            }
+            } ?: log.error { "Queue for partition $partition not found for resending records." }
         }
     }
 }

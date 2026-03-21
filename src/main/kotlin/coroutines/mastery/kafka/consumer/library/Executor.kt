@@ -61,7 +61,9 @@ class Executor<K, V>(
             .onEach { event ->
                 when (event) {
                     is QueueLifecycleEvent.QueueCreated -> {
-                        val job = backgroundScope.launch(dispatcher) {
+                        val coroutineName =
+                            CoroutineName("executor-partition-" + event.partition.partition())
+                        val job = backgroundScope.launch(dispatcher + coroutineName) {
                             processPartition(event.partition, event.queue)
                         }
                         partitionJobs[event.partition] = job

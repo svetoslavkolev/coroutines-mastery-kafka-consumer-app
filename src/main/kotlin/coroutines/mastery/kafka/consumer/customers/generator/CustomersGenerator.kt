@@ -3,6 +3,7 @@ package coroutines.mastery.kafka.consumer.customers.generator
 import coroutines.mastery.kafka.consumer.customers.Customer
 import coroutines.mastery.kafka.consumer.customers.persistence.CustomerRepository
 import mu.KotlinLogging
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -11,6 +12,12 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 
 @Component
+@ConditionalOnProperty(
+    prefix = "generator.customers",
+    name = ["enabled"],
+    havingValue = "true",
+    matchIfMissing = true
+)
 class CustomersGenerator(
     private val kafkaTemplate: KafkaTemplate<String, String>,
     private val jsonMapper: JsonMapper,

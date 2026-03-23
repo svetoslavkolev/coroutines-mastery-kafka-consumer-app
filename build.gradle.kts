@@ -55,6 +55,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-kafka")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("org.awaitility:awaitility-kotlin:4.2.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
